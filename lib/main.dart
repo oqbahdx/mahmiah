@@ -84,7 +84,7 @@ class _HomePageState extends State<HomePage> {
   setState(() {
     _locations = getLocationsFromHive();
     // Rebuild markers based on loaded locations
-    _rebuildMarkers();
+    // _rebuildMarkers();
   });
 }
   Future<void> _getUserLocation() async {
@@ -331,7 +331,7 @@ void _addNewLocation(String title, String description, File? imageFile) {
 
   setState(() {
     _locations.add(newLocation);
-    _addMarkerForLocation(newLocation, _locations.length - 1);
+    // _addMarkerForLocation(newLocation, _locations.length - 1);
   });
   
   // Save to local storage
