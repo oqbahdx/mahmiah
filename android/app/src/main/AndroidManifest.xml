@@ -6,6 +6,7 @@
     <application
         android:label="mahmiah"
         android:name="${applicationName}"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <meta-data android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDaehUmhV5GS62I-7BOVBe_wss0HI-2GJk"/>

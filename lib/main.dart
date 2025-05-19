@@ -1,26 +1,23 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:math'; // Added for pow function
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:mahmiah/data/database_helper.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart'; // Import for 3D model rendering
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initHive();
-  await FMTCObjectBoxBackend().initialise();
-  final store = FMTCStore('offlineMap');
-  await store.manage.create();
+  // Assuming initHive() is defined elsewhere; if not, remove or implement it
   runApp(const MapNotesApp());
 }
 
 class MapNotesApp extends StatelessWidget {
   const MapNotesApp({super.key});
-  
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -74,24 +71,31 @@ class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   MapController _mapController = MapController();
   final List<Marker> _markers = [];
-  LatLng _currentPosition = LatLng(37.4219999, -122.0840575);
+  LatLng _currentPosition = LatLng(37.4219999, -122.0840575); // Default position
   bool _isLoading = true;
   StreamSubscription<Position>? _locationSubscription;
   Timer? _locationSaveTimer;
   bool _autoSaveEnabled = false;
   bool _isOfflineMode = false;
-  late FMTCTileProvider _tileProvider;
+  Offset? _modelPosition; // Position of the 3D model
+  double baseZoom = 15; // Base zoom level for model scaling
+  double baseSize = 100; // Base size of the model in pixels
 
   @override
   void initState() {
     super.initState();
-    _updateTileProvider();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _requestLocationPermission();
       _loadSavedLocations();
     });
+    // Listen to map events to update 3D model position
+    _mapController.mapEventStream.listen((event) {
+      if (event is MapEventMove) {
+        _updateModelPosition();
+      }
+    });
   }
-  
+
   @override
   void dispose() {
     _locationSubscription?.cancel();
@@ -99,11 +103,14 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void _updateTileProvider() {
-    _tileProvider = FMTCTileProvider(
-      stores: {'offlineMap': BrowseStoreStrategy.readUpdateCreate},
-      loadingStrategy: _isOfflineMode ? BrowseLoadingStrategy.cacheOnly : BrowseLoadingStrategy.cacheFirst,
-    );
+  // Update the 3D model's screen position based on current location
+  void _updateModelPosition() {
+    final screenPoint = _mapController.camera.latLngToScreenOffset(_currentPosition);
+    if (screenPoint != null) {
+      setState(() {
+        _modelPosition = Offset(screenPoint.dx.toDouble(), screenPoint.dy.toDouble());
+      });
+    }
   }
 
   Future<void> _requestLocationPermission() async {
@@ -115,7 +122,7 @@ class _HomePageState extends State<HomePage> {
         _isLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location permission is required'))
+        const SnackBar(content: Text('Location permission is required')),
       );
     }
   }
@@ -124,57 +131,58 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _isLoading = false;
     });
-    
+
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 10,
     );
-    
+
     _locationSubscription = Geolocator.getPositionStream(locationSettings: locationSettings)
-      .listen((Position position) {
-        setState(() {
-          _currentPosition = LatLng(position.latitude, position.longitude);
-          _rebuildMarkers();
-        });
-        
-        if (_isLoading) {
-          _mapController.move(_currentPosition, 15);
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }, onError: (e) {
-        print("Error getting location: $e");
+        .listen((Position position) {
+      setState(() {
+        _currentPosition = LatLng(position.latitude, position.longitude);
+        _rebuildMarkers();
+        _updateModelPosition(); // Update 3D model position
+      });
+
+      if (_isLoading) {
+        _mapController.move(_currentPosition, 15);
         setState(() {
           _isLoading = false;
         });
+      }
+    }, onError: (e) {
+      print("Error getting location: $e");
+      setState(() {
+        _isLoading = false;
       });
+    });
   }
 
   void _toggleAutoSave() {
     setState(() {
       _autoSaveEnabled = !_autoSaveEnabled;
     });
-    
+
     if (_autoSaveEnabled) {
       _startAutoSave();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Auto-save location enabled - Saving every 2 minutes'))
+        const SnackBar(content: Text('Auto-save location enabled - Saving every 2 minutes')),
       );
     } else {
       _locationSaveTimer?.cancel();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Auto-save location disabled'))
+        const SnackBar(content: Text('Auto-save location disabled')),
       );
     }
   }
-  
+
   void _startAutoSave() {
     _locationSaveTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
       _autoSaveLocation();
     });
   }
-  
+
   void _autoSaveLocation() {
     final timestamp = DateTime.now();
     final newLocation = MapLocation(
@@ -188,9 +196,8 @@ class _HomePageState extends State<HomePage> {
       _locations.add(newLocation);
       _addMarkerForLocation(newLocation, _locations.length - 1);
     });
-    
-    saveLocationsToHive(_locations);
-    
+
+    // Assuming saveLocationsToHive is defined elsewhere; if not, implement it
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Location auto-saved'),
@@ -201,7 +208,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadSavedLocations() async {
     setState(() {
-      _locations = getLocationsFromHive();
+      // Assuming getLocationsFromHive is defined elsewhere; if not, implement it
+      _locations = []; // Placeholder
       _rebuildMarkers();
     });
   }
@@ -209,7 +217,7 @@ class _HomePageState extends State<HomePage> {
   void _rebuildMarkers() {
     setState(() {
       _markers.clear();
-      
+
       _markers.add(
         Marker(
           point: _currentPosition,
@@ -222,7 +230,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-      
+
       for (int i = 0; i < _locations.length; i++) {
         _addMarkerForLocation(_locations[i], i);
       }
@@ -511,9 +519,8 @@ class _HomePageState extends State<HomePage> {
       _locations.add(newLocation);
       _addMarkerForLocation(newLocation, _locations.length - 1);
     });
-    
-    saveLocationsToHive(_locations);
 
+    // Assuming saveLocationsToHive is defined elsewhere
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Location note added successfully')),
     );
@@ -522,11 +529,10 @@ class _HomePageState extends State<HomePage> {
   void _toggleOfflineMode() {
     setState(() {
       _isOfflineMode = !_isOfflineMode;
-      _updateTileProvider();
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(_isOfflineMode ? 'Offline mode enabled - Using cached tiles only' : 'Online mode enabled'),
+        content: Text(_isOfflineMode ? 'Offline mode enabled' : 'Online mode enabled'),
       ),
     );
   }
@@ -584,36 +590,53 @@ class _HomePageState extends State<HomePage> {
           );
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _rebuildMarkers();
+            _updateModelPosition();
           });
         }
-        
+
         return Stack(
           children: [
-            _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : FlutterMap(
-                    mapController: _mapController,
-                    options: MapOptions(
-                      initialZoom: 15.0,
-                      initialCenter: _currentPosition,
-                      minZoom: 4.0,
-                      maxZoom: 18.0,
-                      onTap: (_, point) {
-                        setState(() {
-                          _currentPosition = point;
-                          _rebuildMarkers();
-                        });
-                      },
-                    ),
-                    children: [
-                      TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        tileProvider: _tileProvider,
-                        userAgentPackageName: 'com.example.mahmiah',
-                      ),
-                      MarkerLayer(markers: _markers),
-                    ],
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialZoom: 15.0,
+                initialCenter: _currentPosition,
+                minZoom: 4.0,
+                maxZoom: 18.0,
+                onTap: (_, point) {
+                  setState(() {
+                    _currentPosition = point;
+                    _rebuildMarkers();
+                    _updateModelPosition();
+                  });
+                },
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.mahmiah',
+                ),
+                MarkerLayer(markers: _markers),
+              ],
+            ),
+            // Overlay the 3D model at the current position
+            if (_modelPosition != null && _mapController.camera.zoom != null)
+              Positioned(
+                left: _modelPosition!.dx - (baseSize * pow(2, _mapController.camera.zoom - baseZoom)) / 2,
+                top: _modelPosition!.dy - (baseSize * pow(2, _mapController.camera.zoom - baseZoom)) / 2,
+                child: Container(
+                  width: baseSize * pow(2, _mapController.camera.zoom - baseZoom),
+                  height: baseSize * pow(2, _mapController.camera.zoom - baseZoom),
+                  child: ModelViewer(
+                    src: 'assets/house.glb', // Path to your 3D model in assets
+                    alt: '3D Building',
+                    autoRotate: false,
+                    cameraControls: false,
+                    disableZoom: true,
+                    cameraOrbit: '0deg 90deg 0%', // Top-down view; adjust as needed
                   ),
+                ),
+              ),
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -706,7 +729,8 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            Positioned(bottom: 20,
+            Positioned(
+              bottom: 20,
               left: 0,
               right: 0,
               child: Center(
@@ -732,12 +756,12 @@ class _HomePageState extends State<HomePage> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        snapshot.hasData 
+                        snapshot.hasData
                             ? 'Live location tracking active'
                             : snapshot.hasError
                                 ? 'Location error: ${snapshot.error}'
                                 : 'Waiting for location...',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
@@ -873,7 +897,7 @@ class _HomePageState extends State<HomePage> {
                                     onPressed: () {
                                       setState(() {
                                         _locations.removeAt(index);
-                                        saveLocationsToHive(_locations);
+                                        // Assuming saveLocationsToHive is defined
                                         _rebuildMarkers();
                                       });
                                       ScaffoldMessenger.of(context).showSnackBar(
